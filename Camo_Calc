@@ -1,0 +1,153 @@
+import cv2
+from PIL import Image, ImageOps
+import numpy as np
+
+
+def compare_gabor_filters(img1, img2, num_scales=4, num_orientations=6):
+  # Convert images to grayscale
+  gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+  gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+
+  # Normalize images
+  gray1 = cv2.normalize(gray1, None, 0, 255, cv2.NORM_MINMAX)
+  gray2 = cv2.normalize(gray2, None, 0, 255, cv2.NORM_MINMAX)
+
+  # Create Gabor filter kernels
+  kernels = []
+  for theta in np.arange(0, np.pi, np.pi / num_orientations):
+    for sigma in np.arange(0.5, 4.0, 2.0 / num_scales):
+      kernel = cv2.getGaborKernel((21, 21), sigma, theta, 10.0, 0.5, 0)
+      kernels.append(kernel)
+
+  # Apply Gabor filters to images
+  filtered1 = [cv2.filter2D(gray1, -1, kernel) for kernel in kernels]
+  filtered2 = [cv2.filter2D(gray2, -1, kernel) for kernel in kernels]
+
+  # Calculate correlation coefficients
+  results = []
+  correlation_values = []
+  for i in range(len(kernels)):
+    corr = cv2.matchTemplate(filtered1[i], filtered2[i], cv2.TM_CCOEFF_NORMED)
+    results.append((i // num_orientations, i % num_orientations, corr.max()))
+    correlation_values.append(corr.max())
+
+  # Calculate average correlation
+  average_correlation = np.mean(correlation_values)
+
+  return average_correlation
+
+
+#contrast difference between camo and background
+def color_space_analysis(image1_path, image2_path):
+    
+    try:
+        img1 = cv2.imread(image1_path)
+        img2 = cv2.imread(image2_path)
+
+        if img1 is None or img2 is None:
+            raise ValueError("One or both images could not be loaded.")
+
+        color_spaces = {
+            "RGB": cv2.COLOR_BGR2RGB,
+            "HSV": cv2.COLOR_BGR2HSV,
+            "Lab": cv2.COLOR_BGR2Lab,
+            "YCrCb": cv2.COLOR_BGR2YCrCb,
+            "Gray": cv2.COLOR_BGR2GRAY
+        }
+
+        converted_images1 = {}
+        converted_images2 = {}
+
+        for name, code in color_spaces.items():
+            if name != "Gray":
+                converted_images1[name] = cv2.cvtColor(img1, code)
+                converted_images2[name] = cv2.cvtColor(img2, code)
+            else:
+                converted_images1[name] = cv2.cvtColor(img1, code)
+                converted_images2[name] = cv2.cvtColor(img2, code)
+
+        percentage_differences = []  # Store percentage differences
+
+        for name in color_spaces:
+            mean1 = np.mean(converted_images1[name])
+            mean2 = np.mean(converted_images2[name])
+
+            if mean1 == 0:  # Avoid division by zero
+                percentage_diff = float('inf') if mean2 != 0 else 0.0
+            else:
+                percentage_diff = abs((mean2 - mean1) / mean1) * 100
+
+            percentage_differences.append(percentage_diff)  # Add to the list
+
+       
+        valid_differences = [diff for diff in percentage_differences if diff != float('inf')]
+        average_percentage_difference = np.mean(valid_differences) if valid_differences else 0.0  # Handle empty list case
+
+        print(f"\n Color Difference of Pattern and Background: {average_percentage_difference:.2f}%")
+
+    except ValueError as e:
+        print(f"Error: {e}")
+    except FileNotFoundError:
+        print("Error: One or both image files not found.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+
+def calculate_lbp(image, radius=1, n_points=8):
+    height, width = image.shape
+    lbp_image = np.zeros((height, width), dtype=np.uint8)
+
+    for i in range(radius, height - radius):
+        for j in range(radius, width - radius):
+            center = image[i, j]
+            binary_string = ''
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    if dx != 0 or dy != 0:
+                        binary_string += '1' if image[i + dy, j + dx] >= center else '0'
+            lbp_image[i, j] = int(binary_string, 2)
+   
+    return lbp_image
+
+
+
+#images inputs
+image_path_camo = r"camo.png"
+image_path_location = r"location.jpg"
+
+camo_pattern = cv2.imread(image_path_camo)
+location_image = cv2.imread(image_path_location)
+average_correlation = compare_gabor_filters(camo_pattern, location_image)
+
+# Load images using Pillow
+img1 = Image.open(image_path_camo)
+img2 = Image.open(image_path_location)
+
+# Convert images to grayscale
+gray1 = ImageOps.grayscale(img1)
+gray2 = ImageOps.grayscale(img2)
+
+# Convert to NumPy arrays
+gray1 = np.array(gray1)
+gray2 = np.array(gray2)
+
+# Calculate LBP features manually
+lbp1 = calculate_lbp(gray1)
+lbp2 = calculate_lbp(gray2)
+
+# Compute histograms for LBP
+hist1, _ = np.histogram(lbp1, bins=np.arange(0, 256), range=(0, 255))
+hist2, _ = np.histogram(lbp2, bins=np.arange(0, 256), range=(0, 255))
+
+# Normalize the histograms
+hist1 = hist1.astype(float) / np.sum(hist1)
+hist2 = hist2.astype(float) / np.sum(hist2)
+
+# Compute histogram intersection
+intersection = np.minimum(hist1, hist2)
+similarity = np.sum(intersection)
+
+#calculating efficiency score
+overall_eff = (average_correlation + similarity)/2
+
+print(f"\n Efficiency of Camouflage Pattern Texture: {overall_eff:.2f}")
