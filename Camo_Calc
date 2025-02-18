@@ -148,6 +148,6 @@ intersection = np.minimum(hist1, hist2)
 similarity = np.sum(intersection)
 
 #calculating efficiency score
-overall_eff = (average_correlation + similarity)/2
+overall_eff = 0.4*average_correlation + 0.6*similarity
 
 print(f"\n Efficiency of Camouflage Pattern Texture: {overall_eff:.2f}")
